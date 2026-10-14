@@ -1,0 +1,8 @@
+yt-dlp
+faster-whisper
+# faster-whisper 1.2.1 передає av.open(metadata_errors=...), якого немає в PyAV 19
+av<19
+# GPU: cuBLAS 12 і cuDNN 9 для ctranslate2 (yt2txt.py сам додає їх у PATH)
+nvidia-cublas-cu12
+nvidia-cudnn-cu12==9.*
+pillow
