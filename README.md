@@ -102,6 +102,10 @@ python -m venv .venv
 - Якщо yt-dlp перестав завантажувати з YouTube, онови його: `.\.venv\Scripts\python.exe -m pip install -U yt-dlp`.
 - Шрифти обкладинки (Segoe UI) беруться з `C:\Windows\Fonts`, тому генерація обкладинок працює лише на Windows.
 
+## Як створено
+
+Проєкт зроблено разом із [Claude Code](https://claude.com/claude-code). Ідея, сценарій роботи (транскрипт → стаття з фактчеком → telegra.ph), вимоги, перевірка й ключові рішення мої. Більшу частину коду написав ШІ.
+
 ## Ліцензія
 
 [MIT](LICENSE)
