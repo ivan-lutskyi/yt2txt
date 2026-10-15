@@ -246,7 +246,13 @@ def load_model(name: str, device: str):
     return WhisperModel(name, device="cpu", compute_type="int8"), "cpu"
 
 
-def transcribe(model: WhisperModel, audio: Path, lang: str | None, duration: float):
+def print_progress(done: float, duration: float):
+    pct = min(100, done / duration * 100)
+    print(f"\r  розпізнано {pct:5.1f}%  [{fmt_ts(done)} / {fmt_ts(duration)}]", end="", flush=True)
+
+
+def transcribe(model: WhisperModel, audio: Path, lang: str | None, duration: float, on_progress=print_progress):
+    """on_progress(розпізнано_секунд, тривалість) викликається після кожного сегмента."""
     segments, info = model.transcribe(
         str(audio),
         language=lang,                    # None = автовизначення
@@ -258,9 +264,9 @@ def transcribe(model: WhisperModel, audio: Path, lang: str | None, duration: flo
     for seg in segments:
         result.append(seg)
         if duration:
-            pct = min(100, seg.end / duration * 100)
-            print(f"\r  розпізнано {pct:5.1f}%  [{fmt_ts(seg.end)} / {fmt_ts(duration)}]", end="", flush=True)
-    print()
+            on_progress(seg.end, duration)
+    if on_progress is print_progress:
+        print()
     return result, info
 
 
@@ -313,6 +319,37 @@ def build_markdown(info: dict, url: str, paras, lang_info, model_name: str, prom
     return "\n".join(lines)
 
 
+def process_url(model: WhisperModel, url: str, *, model_name: str, lang: str | None = None,
+                prompt: str = DEFAULT_PROMPT, out_dir: Path = Path("transcripts"),
+                cover: str = "own", stamp: str = "ПРОАНАЛІЗОВАНО",
+                on_progress=print_progress, log=print):
+    """Одне відео: завантаження → розпізнавання → .md (+ обкладинка). Повертає (шлях_md, шлях_jpg | None, info)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        info, audio = download_audio(url, Path(tmp))
+        log(f"  {info.get('title')}")
+        segments, lang_info = transcribe(model, audio, lang, info.get("duration") or 0, on_progress)
+    md = build_markdown(info, url, to_paragraphs(segments), lang_info, model_name, prompt)
+    date = info.get("upload_date") or "nodate"
+    path = out_dir / f"{date}_{safe_name(info.get('title', info['id']))}.md"
+    path.write_text(md, encoding="utf-8")
+    log(f"  ✓ {path}")
+
+    cover_path = None
+    if cover == "own" or (cover == "thumb" and info.get("thumbnail")):
+        try:
+            cover_path = path.with_suffix(".jpg")
+            if cover == "own":
+                own_cover(info, cover_path)
+            else:
+                thumb_cover(info, cover_path, stamp)
+            log(f"  ✓ {cover_path}")
+        except Exception as e:
+            cover_path = None
+            log(f"  ✗ обкладинка: {e}")
+    return path, cover_path, info
+
+
 def main():
     ap = argparse.ArgumentParser(description="YouTube → транскрипт + промпт для ШІ")
     ap.add_argument("urls", nargs="+", help="одне або кілька посилань")
@@ -328,8 +365,6 @@ def main():
     args = ap.parse_args()
 
     prompt = Path(args.prompt_file).read_text(encoding="utf-8") if args.prompt_file else DEFAULT_PROMPT
-    out_dir = Path(args.out)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Завантажую модель {args.model}…")
     model, device = load_model(args.model, args.device)
@@ -339,26 +374,9 @@ def main():
         t0 = time.time()
         print(f"\n▶ {url}")
         try:
-            with tempfile.TemporaryDirectory() as tmp:
-                info, audio = download_audio(url, Path(tmp))
-                print(f"  {info.get('title')}")
-                segments, lang_info = transcribe(model, audio, args.lang, info.get("duration") or 0)
-            paras = to_paragraphs(segments)
-            md = build_markdown(info, url, paras, lang_info, args.model, prompt)
-            date = (info.get("upload_date") or "nodate")
-            path = out_dir / f"{date}_{safe_name(info.get('title', info['id']))}.md"
-            path.write_text(md, encoding="utf-8")
-            print(f"  ✓ {path}  ({time.time() - t0:.0f} с)")
-            if args.cover == "own" or (args.cover == "thumb" and info.get("thumbnail")):
-                try:
-                    cover = path.with_suffix(".jpg")
-                    if args.cover == "own":
-                        own_cover(info, cover)
-                    else:
-                        thumb_cover(info, cover, args.stamp)
-                    print(f"  ✓ {cover}")
-                except Exception as e:
-                    print(f"  ✗ обкладинка: {e}", file=sys.stderr)
+            process_url(model, url, model_name=args.model, lang=args.lang, prompt=prompt,
+                        out_dir=Path(args.out), cover=args.cover, stamp=args.stamp)
+            print(f"  ({time.time() - t0:.0f} с)")
         except Exception as e:
             print(f"  ✗ помилка: {e}", file=sys.stderr)
 
